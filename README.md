@@ -164,6 +164,26 @@ GLOBAL=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/lsdefine/Generi
 
 > 💡 GenericAgent grows its environment **through the Agent itself** — don't pre-install everything. See [Unlocking Advanced Capabilities](#-unlocking-advanced-capabilities) below.
 
+#### Method 3 — Nix flakes *(development + terminal UI)*
+
+```bash
+nix develop
+# or run the packaged terminal UI directly
+nix run
+```
+
+Downstream flakes can install the default terminal UI package:
+
+```nix
+inputs.genericagent.url = "github:lsdefine/GenericAgent";
+
+# then add to packages, for example:
+inputs.genericagent.packages.${system}.default
+```
+
+Installed binaries include `genericagent-tui` / `ga-tui` for the Textual terminal UI and `ga` for the command dispatcher. Set `GENERICAGENT_HOME` to choose the writable runtime/config directory; otherwise it defaults to `$XDG_DATA_HOME/genericagent` or `~/.local/share/genericagent`.
+
+
 ---
 
 ## 💻 Usage

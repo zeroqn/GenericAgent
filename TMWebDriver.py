@@ -1,6 +1,9 @@
 import json, threading, time, uuid, queue, socket, requests, traceback
 from typing import Any
-from simple_websocket_server import WebSocketServer, WebSocket
+try:
+    from simple_websocket_server import WebSocketServer, WebSocket
+except ModuleNotFoundError:
+    from SimpleWebSocketServer import SimpleWebSocketServer as WebSocketServer, WebSocket
 import bottle
 from bottle import request
 
