@@ -168,11 +168,11 @@ GLOBAL=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/lsdefine/Generi
 
 ```bash
 nix develop
-# or run the packaged terminal UI directly
-nix run
+# or run the packaged command dispatcher
+nix run . -- list
 ```
 
-Downstream flakes can install the default terminal UI package:
+Downstream flakes can install the default command-dispatcher package:
 
 ```nix
 inputs.genericagent.url = "github:lsdefine/GenericAgent";
@@ -181,7 +181,7 @@ inputs.genericagent.url = "github:lsdefine/GenericAgent";
 inputs.genericagent.packages.${system}.default
 ```
 
-Installed binaries include `genericagent-tui` / `ga-tui` for the Textual terminal UI and `ga` for the command dispatcher. Set `GENERICAGENT_HOME` to choose the writable runtime/config directory; otherwise it defaults to `$XDG_DATA_HOME/genericagent` or `~/.local/share/genericagent`.
+The installed binary is `ga`, the command dispatcher; use `ga list`, `ga tui2`, or `ga tui3` to choose a frontend. Set `GENERICAGENT_HOME` to choose the writable runtime/config directory; otherwise the Nix wrapper defaults to `/workspace/ga`. The wrapper symlinks read-only app files from the Nix store into that runtime directory while keeping writable state directories such as `memory/` and `temp/` real.
 
 
 ---
