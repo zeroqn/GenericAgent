@@ -70,6 +70,11 @@ COMMANDS = {
         "desc": "启动增强版终端图形界面（Textual v2），更多功能更好的体验",
         "cmd": ["python", "{FRONTENDS}/tuiapp_v2.py"],
     },
+    "tui3": {
+        "help": "启动终端 TUI v3 (tui_v3)",
+        "desc": "启动 scrollback-first 终端图形界面（prompt_toolkit v3），新版 TUI",
+        "cmd": ["python", "{FRONTENDS}/tui_v3.py"],
+    },
     "cli": {
         "help": "启动 CLI 对话 (agentmain)",
         "desc": "启动命令行交互对话模式，最轻量的使用方式",
@@ -158,6 +163,7 @@ def main():
               ga web --native      启动 Web 基础版(桌面壳)
               ga tui               启动终端 TUI (v1)
               ga tui2              启动终端 TUI (v2 增强版)
+              ga tui3              启动终端 TUI (v3 scrollback-first)
               ga pet               启动桌面宠物 v2
               ga launch            启动 webview 桌面壳
               ga list              列出所有命令
