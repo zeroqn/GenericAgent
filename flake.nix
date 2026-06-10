@@ -32,9 +32,14 @@
           pillow
           prompt-toolkit
           psutil
+          pycryptodome
+          python-telegram-bot
+          pywebview
+          qrcode
           requests
           rich
           simple-websocket-server
+          streamlit
           textual
           tkinter
           urllib3
