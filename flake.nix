@@ -24,8 +24,38 @@
             "result"
           ]);
       };
+      pythonFor = pkgs:
+        pkgs.python312.override {
+          packageOverrides = pySelf: pySuper: {
+            # These overrides avoid current nixpkgs dev-shell failures/slow
+            # builds while keeping GenericAgent runtime modules available.
+            altair = pySuper.altair.overridePythonAttrs (old: {
+              doCheck = false;
+              # Check-only helper; otherwise this pulls a large Rust-backed
+              # vl-convert-python build just to enter the dev shell.
+              nativeBuildInputs = builtins.filter
+                (dep: (dep.pname or dep.name or "") != "vl-convert-python")
+                (old.nativeBuildInputs or []);
+            });
+            apscheduler = pySuper.apscheduler.overridePythonAttrs (_old: {
+              doCheck = false;
+            });
+            streamlit = pySuper.streamlit.overridePythonAttrs (old: {
+              # GenericAgent does not use Streamlit's pydeck chart integration;
+              # omitting it avoids a large Jupyter/vl-convert Rust build when
+              # entering the dev shell.
+              dependencies = builtins.filter
+                (dep: (dep.pname or dep.name or "") != "pydeck")
+                (old.dependencies or []);
+              propagatedBuildInputs = builtins.filter
+                (dep: (dep.pname or dep.name or "") != "pydeck")
+                (old.propagatedBuildInputs or []);
+              pythonRemoveDeps = (old.pythonRemoveDeps or []) ++ [ "pydeck" ];
+            });
+          };
+        };
       pythonEnvFor = pkgs:
-        pkgs.python312.withPackages (ps: with ps; [
+        (pythonFor pkgs).withPackages (ps: with ps; [
           aiohttp
           beautifulsoup4
           bottle
