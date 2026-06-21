@@ -130,8 +130,11 @@ link_entry() {
       ;;
   esac
 
-  if [ ! -e "\$runtime_dir/\$name" ] && [ ! -L "\$runtime_dir/\$name" ]; then
-    ln -s "\$src" "\$runtime_dir/\$name"
+  dest="\$runtime_dir/\$name"
+  if [ -L "\$dest" ]; then
+    ln -sfn "\$src" "\$dest"
+  elif [ ! -e "\$dest" ]; then
+    ln -s "\$src" "\$dest"
   fi
 }
 
@@ -152,18 +155,30 @@ for src in "\$app_dir/assets"/* "\$app_dir/assets"/.[!.]* "\$app_dir/assets"/..?
         [ -e "\$sub" ] || continue
         subname="\$(basename "\$sub")"
         [ "\$subname" = "config.js" ] && continue
-        if [ ! -e "\$runtime_dir/assets/tmwd_cdp_bridge/\$subname" ] && [ ! -L "\$runtime_dir/assets/tmwd_cdp_bridge/\$subname" ]; then
-          ln -s "\$sub" "\$runtime_dir/assets/tmwd_cdp_bridge/\$subname"
+        dest="\$runtime_dir/assets/tmwd_cdp_bridge/\$subname"
+        if [ -L "\$dest" ]; then
+          ln -sfn "\$sub" "\$dest"
+        elif [ ! -e "\$dest" ]; then
+          ln -s "\$sub" "\$dest"
         fi
       done
       ;;
     *)
-      if [ ! -e "\$runtime_dir/assets/\$name" ] && [ ! -L "\$runtime_dir/assets/\$name" ]; then
-        ln -s "\$src" "\$runtime_dir/assets/\$name"
+      dest="\$runtime_dir/assets/\$name"
+      if [ -L "\$dest" ]; then
+        ln -sfn "\$src" "\$dest"
+      elif [ ! -e "\$dest" ]; then
+        ln -s "\$src" "\$dest"
       fi
       ;;
   esac
 done
+
+if [ ! -d "\$runtime_dir/ga_cli" ]; then
+  echo "GenericAgent runtime is missing ga_cli module at \$runtime_dir/ga_cli" >&2
+  echo "Remove or fix that path, or set GENERICAGENT_HOME to a clean runtime directory." >&2
+  exit 1
+fi
 EOF
               chmod +x $out/libexec/genericagent-init-runtime
 
