@@ -35,7 +35,7 @@ all-frontends = [
     "pycryptodome>=3.19",
     "qrcode>=7.4",
     "lark-oapi>=1.0",
-    "wecom-aibot-sdk>=1.0",
+    "cryptography>=43.0",
     "dingtalk-stream>=0.20",
 ]
 

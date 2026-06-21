@@ -430,7 +430,7 @@ PLATFORMS = [
         'name': '企业微信机器人',
         'desc': '通过企业微信 Bot 接入',
         'file': 'frontends/wecomapp.py',
-        'deps': ['wecombot'],
+        'deps': ['aiohttp', 'cryptography'],
         'env_vars': [
             {'key': 'wecom_bot_id', 'label': 'Bot ID'},
             {'key': 'wecom_secret', 'label': 'Bot Secret'},

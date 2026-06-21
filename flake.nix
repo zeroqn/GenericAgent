@@ -29,6 +29,7 @@
           aiohttp
           beautifulsoup4
           bottle
+          cryptography
           pillow
           prompt-toolkit
           psutil

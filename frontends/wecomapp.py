@@ -22,11 +22,7 @@ from chatapp_common import (AgentChatMixin, FILE_HINT, build_done_text, clean_re
                             redirect_log, require_runtime, split_text, strip_files)
 from llmcore import mykeys
 
-try:
-    from wecom_aibot_sdk import WSClient, generate_req_id
-except Exception:
-    print("Please install wecom_aibot_sdk: pip install wecom_aibot_sdk")
-    sys.exit(1)
+from frontends.wecom_client import WSClient, generate_req_id
 
 # ── Config ──────────────────────────────────────────────────────────
 BOT_ID    = str(mykeys.get("wecom_bot_id", "") or "").strip()
