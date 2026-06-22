@@ -193,7 +193,8 @@ uv pip install -e ".[ui]"
 
 If `git pull` reports conflicts:
 
-- For `mykey.py`, `memory/`, `skills/`, `temp/`, and user-created artifacts: prefer the local copy.
+- For `mykey.py`, `mykey.json`, `memory/`, `skills/`, `temp/`, `bbs_files/`, and user-created artifacts: prefer the local/runtime copy.
+- In Nix installs, core app code stays immutable in the package app root; `GENERICAGENT_HOME` owns writable runtime state and should not contain a broad symlink copy of app files.
 - For core code such as `agent*.py`, `frontends/*`, `reflect/*`, and `tools/*`: usually prefer upstream unless the user says otherwise.
 - Resolve explicitly, then `git add` and commit the merge.
 

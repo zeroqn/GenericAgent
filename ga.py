@@ -7,7 +7,8 @@ if sys.stderr is None: sys.stderr = open(os.devnull, "w")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from agent_loop import BaseHandler, StepOutcome, json_default
-script_dir = os.path.dirname(os.path.abspath(__file__))
+from ga_paths import APP_ROOT, asset_path, memory_path, temp_path
+script_dir = str(APP_ROOT)
 
 def safe_print(*args, **kwargs):
     try: print(*args, **kwargs)
@@ -18,13 +19,13 @@ def code_run(code, code_type="python", timeout=60, cwd=None, code_cwd=None, stop
     python: 运行复杂的 .py 脚本（文件模式）
     powershell/bash: 运行单行指令（命令模式）
     优先使用python，仅在必要系统操作时使用powershell"""
+    cwd = cwd or str(temp_path()); tmp_path = None
     preview = (code[:60].replace('\n', ' ') + '...') if len(code) > 60 else code.strip()
     yield f"[Action] Running {code_type} in {os.path.basename(cwd)}: {preview}\n"
-    cwd = cwd or os.path.join(script_dir, 'temp'); tmp_path = None
     if code_type in ["python", "py"]:
         tmp_file = tempfile.NamedTemporaryFile(suffix=".ai.py", delete=False, mode='w', encoding='utf-8', dir=code_cwd)
-        cr_header = os.path.join(script_dir, 'assets', 'code_run_header.py')
-        if os.path.exists(cr_header): tmp_file.write(open(cr_header, encoding='utf-8').read())
+        cr_header = asset_path('code_run_header.py')
+        if cr_header.exists(): tmp_file.write(cr_header.read_text(encoding='utf-8'))
         tmp_file.write(code)
         tmp_path = tmp_file.name
         tmp_file.close()
@@ -156,10 +157,11 @@ def format_error(e):
 
 def log_memory_access(path):
     if 'memory' not in path: return
-    stats_file = os.path.join(script_dir, 'memory/file_access_stats.json')
+    stats_file = memory_path('file_access_stats.json')
     try:
         with open(stats_file, 'r', encoding='utf-8') as f: stats = json.load(f)
     except: stats = {}
+    stats_file.parent.mkdir(parents=True, exist_ok=True)
     fname = os.path.basename(path)
     stats[fname] = {'count': stats.get(fname, {}).get('count', 0) + 1, 'last': datetime.now().strftime('%Y-%m-%d')}
     with open(stats_file, 'w', encoding='utf-8') as f: json.dump(stats, f, indent=2, ensure_ascii=False)
@@ -517,8 +519,8 @@ class GenericAgentHandler(BaseHandler):
 **操作**：严格遵循提供的L0的记忆更新SOP。先 `file_read` 看现有 → 判断类型 → 最小化更新 → 无新内容跳过，保证对记忆库最小局部修改。\n
 ''' + get_global_memory()
         yield "[Info] Start distilling good memory for long-term storage.\n"
-        path = './memory/memory_management_sop.md'
-        if os.path.exists(path): result = 'This is L0:\n' + file_read(path, show_linenos=False)
+        path = memory_path('memory_management_sop.md')
+        if path.exists(): result = 'This is L0:\n' + file_read(str(path), show_linenos=False)
         else: result = "Memory Management SOP not found. Do not update memory."
         return StepOutcome(result, next_prompt=prompt)
 
@@ -584,9 +586,9 @@ def get_global_memory():
     prompt = "\n"
     try:
         suffix = '_en' if os.environ.get('GA_LANG', '') == 'en' else ''
-        with open(os.path.join(script_dir, 'memory/global_mem_insight.txt'), 'r', encoding='utf-8', errors='replace') as f: insight = f.read()
-        with open(os.path.join(script_dir, f'assets/insight_fixed_structure{suffix}.txt'), 'r', encoding='utf-8') as f: structure = f.read()
-        prompt += f'cwd = {os.path.join(script_dir, "temp")} (./)\n'
+        with memory_path('global_mem_insight.txt').open('r', encoding='utf-8', errors='replace') as f: insight = f.read()
+        with asset_path(f'insight_fixed_structure{suffix}.txt').open('r', encoding='utf-8') as f: structure = f.read()
+        prompt += f'cwd = {temp_path()} (./)\n'
         prompt += f"\n[Memory] (../memory)\n"
         prompt += structure + '\n../memory/global_mem_insight.txt:\n'
         prompt += insight + "\n"

@@ -181,7 +181,7 @@ inputs.genericagent.url = "github:lsdefine/GenericAgent";
 inputs.genericagent.packages.${system}.default
 ```
 
-The installed binary is `ga`, the command dispatcher; use `ga list`, `ga tui2`, or `ga tui3` to choose a frontend. Set `GENERICAGENT_HOME` to choose the writable runtime/config directory; otherwise the Nix wrapper defaults to `/workspace/ga`. The wrapper symlinks read-only app files from the Nix store into that runtime directory while keeping writable state directories such as `memory/` and `temp/` real.
+The installed binary is `ga`, the command dispatcher; use `ga list`, `ga tui2`, or `ga tui3` to choose a frontend. Set `GENERICAGENT_HOME` to choose the writable runtime/config directory; otherwise the Nix wrapper defaults to `/workspace/ga`. Nix keeps app code and immutable assets in the store, while runtime state such as `mykey.py`, `mykey.json`, `memory/`, `temp/`, `bbs_files/`, and the writable CDP bridge config live under `GENERICAGENT_HOME` as real files/directories (not a broad symlink farm).
 
 
 ---

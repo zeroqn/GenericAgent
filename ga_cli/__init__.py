@@ -5,9 +5,10 @@ ga_cli - GenericAgent CLI 命令包
 以 python -m ga_cli 运行时，进入 CLI 命令模式
 """
 import importlib.util, sys, os
+from ga_paths import APP_ROOT
 
 # ── 确保项目根在 sys.path（ga.py 依赖 agent_loop 等）──
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PROJECT_ROOT = str(APP_ROOT)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 

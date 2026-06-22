@@ -24,7 +24,10 @@ C = {
 }
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MYKPY_PATH = os.path.join(PROJECT_ROOT, 'mykey.py')
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+from ga_paths import mykey_py_path, runtime_path
+MYKPY_PATH = str(mykey_py_path())
 
 # ── 模型厂商定义 ───────────────────────────────────────────────────────────
 
@@ -1246,7 +1249,8 @@ def _backup_with_name(model_names, platform_ids):
         safe_name = 'mykey_backup'  # 避免和源文件同名
     if len(safe_name) > 100:
         safe_name = safe_name[:100]
-    backup_path = os.path.join(PROJECT_ROOT, f'{safe_name}.py')
+    backup_path = str(runtime_path(f'{safe_name}.py'))
+    os.makedirs(os.path.dirname(backup_path), exist_ok=True)
     shutil.copy2(MYKPY_PATH, backup_path)
     return backup_path
 

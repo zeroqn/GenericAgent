@@ -1,0 +1,13 @@
+id: python-suspicious-write-callsite
+language: Python
+message: Review Python write callsites for immutable app-root writes; approved runtime writes should use ga_paths helpers.
+severity: warning
+rule:
+  any:
+    - pattern: open($PATH, $MODE, $$$ARGS)
+    - pattern: $PATH.write_text($$$ARGS)
+    - pattern: $PATH.write_bytes($$$ARGS)
+    - pattern: $PATH.mkdir($$$ARGS)
+    - pattern: shutil.copy2($SRC, $DST, $$$ARGS)
+    - pattern: shutil.copy($SRC, $DST, $$$ARGS)
+    - pattern: shutil.copyfile($SRC, $DST, $$$ARGS)

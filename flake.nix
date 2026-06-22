@@ -92,10 +92,17 @@
             version = "0.1.0";
             src = source;
 
-            nativeBuildInputs = [ pkgs.makeWrapper ];
+            nativeBuildInputs = [ pkgs.makeWrapper pkgs.ast-grep ];
 
             dontConfigure = true;
             dontBuild = true;
+            doCheck = true;
+
+            checkPhase = ''
+              runHook preCheck
+              ${pythonEnv}/bin/python scripts/check_runtime_writes.py --ast-grep ${pkgs.ast-grep}/bin/ast-grep --self-test
+              runHook postCheck
+            '';
 
             installPhase = ''
               runHook preInstall
@@ -118,75 +125,35 @@ if [ -e "\$runtime_dir" ] && [ ! -d "\$runtime_dir" ]; then
   exit 1
 fi
 
-mkdir -p "\$runtime_dir" "\$runtime_dir/memory" "\$runtime_dir/temp"
+mkdir -p \
+  "\$runtime_dir" \
+  "\$runtime_dir/memory" \
+  "\$runtime_dir/temp" \
+  "\$runtime_dir/temp/model_responses" \
+  "\$runtime_dir/bbs_files" \
+  "\$runtime_dir/assets" \
+  "\$runtime_dir/assets/tmwd_cdp_bridge"
 
-link_entry() {
-  src="\$1"
-  name="\$(basename "\$src")"
-
-  case "\$name" in
-    assets|memory|temp|mykey.py|mykey.json|boards.json|bbs_files|__pycache__)
-      return
-      ;;
-  esac
-
-  dest="\$runtime_dir/\$name"
-  if [ -L "\$dest" ]; then
-    ln -sfn "\$src" "\$dest"
-  elif [ ! -e "\$dest" ]; then
-    ln -s "\$src" "\$dest"
-  fi
-}
-
-for src in "\$app_dir"/* "\$app_dir"/.[!.]* "\$app_dir"/..?*; do
-  [ -e "\$src" ] || continue
-  link_entry "\$src"
+# Chrome extensions load config.js from the extension directory.  Keep this
+# directory as an explicit writable runtime overlay, but copy app-owned files
+# as real files/directories instead of symlinking into the Nix store.
+for sub in "\$app_dir/assets/tmwd_cdp_bridge"/* "\$app_dir/assets/tmwd_cdp_bridge"/.[!.]* "\$app_dir/assets/tmwd_cdp_bridge"/..?*; do
+  [ -e "\$sub" ] || continue
+  subname="\$(basename "\$sub")"
+  [ "\$subname" = "config.js" ] && continue
+  dest="\$runtime_dir/assets/tmwd_cdp_bridge/\$subname"
+  rm -rf "\$dest"
+  cp -R -L "\$sub" "\$dest"
 done
 
-mkdir -p "\$runtime_dir/assets"
-for src in "\$app_dir/assets"/* "\$app_dir/assets"/.[!.]* "\$app_dir/assets"/..?*; do
-  [ -e "\$src" ] || continue
-  name="\$(basename "\$src")"
-
-  case "\$name" in
-    tmwd_cdp_bridge)
-      mkdir -p "\$runtime_dir/assets/tmwd_cdp_bridge"
-      for sub in "\$app_dir/assets/tmwd_cdp_bridge"/* "\$app_dir/assets/tmwd_cdp_bridge"/.[!.]* "\$app_dir/assets/tmwd_cdp_bridge"/..?*; do
-        [ -e "\$sub" ] || continue
-        subname="\$(basename "\$sub")"
-        [ "\$subname" = "config.js" ] && continue
-        dest="\$runtime_dir/assets/tmwd_cdp_bridge/\$subname"
-        if [ -L "\$dest" ]; then
-          ln -sfn "\$sub" "\$dest"
-        elif [ ! -e "\$dest" ]; then
-          ln -s "\$sub" "\$dest"
-        fi
-      done
-      ;;
-    *)
-      dest="\$runtime_dir/assets/\$name"
-      if [ -L "\$dest" ]; then
-        ln -sfn "\$src" "\$dest"
-      elif [ ! -e "\$dest" ]; then
-        ln -s "\$src" "\$dest"
-      fi
-      ;;
-  esac
-done
-
-if [ ! -d "\$runtime_dir/ga_cli" ]; then
-  echo "GenericAgent runtime is missing ga_cli module at \$runtime_dir/ga_cli" >&2
-  echo "Remove or fix that path, or set GENERICAGENT_HOME to a clean runtime directory." >&2
-  exit 1
+if [ ! -e "\$runtime_dir/assets/tmwd_cdp_bridge/config.js" ]; then
+  printf "const TID = '__ljq_%s';\n" "\$(date +%s)" > "\$runtime_dir/assets/tmwd_cdp_bridge/config.js"
 fi
 EOF
               chmod +x $out/libexec/genericagent-init-runtime
 
               makeWrapper ${pythonEnv}/bin/python $out/bin/ga \
-                --run 'runtime_dir="''${GENERICAGENT_HOME:-/workspace/ga}"' \
-                --run '"'$out'/libexec/genericagent-init-runtime" "$runtime_dir"' \
-                --run 'cd "$runtime_dir"' \
-                --run 'export PYTHONPATH="$runtime_dir''${PYTHONPATH:+:$PYTHONPATH}"' \
+                --run 'runtime_dir="''${GENERICAGENT_HOME:-/workspace/ga}"; export GENERICAGENT_HOME="$runtime_dir"; export GENERICAGENT_APP_ROOT="'$out'/share/genericagent"; "'$out'/libexec/genericagent-init-runtime" "$runtime_dir"; cd "$runtime_dir/temp"; export PYTHONPATH="'$out'/share/genericagent:$runtime_dir''${PYTHONPATH:+:$PYTHONPATH}"' \
                 --prefix PATH : ${runtimePath} \
                 --add-flags -m \
                 --add-flags ga_cli
@@ -219,6 +186,23 @@ EOF
           meta.description = "Run the GenericAgent command dispatcher";
         };
       });
+
+      checks = forAllSystems (system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          pythonEnv = pythonEnvFor pkgs;
+        in
+        {
+          runtime-write-scan = pkgs.runCommand "genericagent-runtime-write-scan"
+            { nativeBuildInputs = [ pythonEnv pkgs.ast-grep ]; }
+            ''
+              cp -R ${source} source
+              chmod -R u+w source
+              cd source
+              python scripts/check_runtime_writes.py --ast-grep ast-grep --self-test
+              touch $out
+            '';
+        });
 
       devShells = forAllSystems (system:
         let

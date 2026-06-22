@@ -1,23 +1,31 @@
-import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, uuid, pathlib
+import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, importlib.util, uuid, pathlib
 from datetime import datetime
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _RESP_CACHE_KEY = str(uuid.uuid4()); _RESP_CODEX_KEY = str(uuid.uuid4())
+from ga_paths import mykey_py_path, mykey_json_path, temp_path
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path: sys.path.append(_ROOT)
 
 def _load_mykeys():
     global _mykey_path
-    try:
-        import mykey; importlib.reload(mykey); _mykey_path = mykey.__file__
-        return {k: v for k, v in vars(mykey).items() if not k.startswith('_')}
-    except ImportError as e:
-        if getattr(e, 'name', None) != 'mykey':
+    py_path = mykey_py_path()
+    if py_path.exists():
+        try:
+            spec = importlib.util.spec_from_file_location("genericagent_runtime_mykey", py_path)
+            mykey = importlib.util.module_from_spec(spec)
+            sys.modules["genericagent_runtime_mykey"] = mykey
+            spec.loader.exec_module(mykey)
+            _mykey_path = str(py_path)
+            return {k: v for k, v in vars(mykey).items() if not k.startswith('_')}
+        except SyntaxError as e:
+            raise Exception(f'[ERROR] mykey.py has syntax error: {e}') from e
+        except Exception as e:
             raise Exception(f'[ERROR] mykey.py found but failed to import: {e}') from e
-    except SyntaxError as e:
-        raise Exception(f'[ERROR] mykey.py has syntax error: {e}') from e
-    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mykey.json')
-    if not os.path.exists(p): raise Exception('[ERROR] mykey.py not found in sys.path and mykey.json not found. Run "python configure_mykey.py" or copy mykey_template.py to mykey.py and fill in your keys.')
-    with open(_mykey_path := p, encoding='utf-8') as f: mk = json.load(f)
+    json_path = mykey_json_path()
+    if not json_path.exists():
+        raise Exception('[ERROR] mykey.py and mykey.json not found in GENERICAGENT_HOME. Run "ga configure" or copy mykey_template.py to mykey.py and fill in your keys.')
+    _mykey_path = str(json_path)
+    with json_path.open(encoding='utf-8') as f: mk = json.load(f)
     if isinstance(mk, dict) and 'remote_url' in mk: return requests.get(mk['remote_url'], timeout=10).json()
     return mk
 
@@ -921,7 +929,7 @@ def _ensure_text_block(blocks):
 def _write_llm_log(label, content, log_path=None, model=''):
     if log_path is False: return
     if not log_path:
-        log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f'temp/model_responses/model_responses_{os.getpid()}.txt')
+        log_path = str(temp_path('model_responses', f'model_responses_{os.getpid()}.txt'))
     os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     if model: model = f' model={model}'

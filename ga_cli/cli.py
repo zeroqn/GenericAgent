@@ -5,12 +5,14 @@ ga_cli/cli.py - GenericAgent 命令行分发系统
 """
 import os, sys, subprocess, argparse, textwrap
 
+from ga_paths import APP_ROOT, temp_path, ensure_runtime_dirs
+
 # Windows GBK 终端兼容
 if sys.platform == "win32" and sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312"):
     sys.stdout.reconfigure(errors="replace") if hasattr(sys.stdout, "reconfigure") else None
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
+PROJECT_DIR = str(APP_ROOT)
 
 
 def _frontends():
@@ -33,10 +35,11 @@ def launch_frontend(cmd_parts, args=None):
     if args:
         full_cmd.extend(args)
 
+    ensure_runtime_dirs()
+    runtime_cwd = str(temp_path())
     print(f"🚀 {' '.join(full_cmd)}")
     sys.stdout.flush()
-    os.chdir(PROJECT_DIR)
-    proc = subprocess.Popen(full_cmd)
+    proc = subprocess.Popen(full_cmd, cwd=runtime_cwd)
     try:
         proc.wait()
     except KeyboardInterrupt:

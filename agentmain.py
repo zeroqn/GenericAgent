@@ -6,6 +6,7 @@ if sys.stderr is None: sys.stderr = open(os.devnull, "w")
 elif hasattr(sys.stderr, 'reconfigure'): sys.stderr.reconfigure(errors='replace')
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from ga_paths import APP_ROOT, asset_path, memory_path, temp_path, runtime_asset_path, ensure_runtime_dirs
 from llmcore import reload_mykeys, ToolClient, MixinSession, NativeToolClient, NativeClaudeSession, NativeOAISession, resolve_client
 from agent_loop import agent_runner_loop
 try:
@@ -13,31 +14,32 @@ try:
 except Exception: pass
 from ga import GenericAgentHandler, smart_format, get_global_memory, format_error, consume_file
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
+script_dir = str(APP_ROOT)
+ensure_runtime_dirs()
 def load_tool_schema(suffix=''):
     global TOOLS_SCHEMA
-    TS = open(os.path.join(script_dir, f'assets/tools_schema{suffix}.json'), 'r', encoding='utf-8').read()
+    TS = asset_path(f'tools_schema{suffix}.json').read_text(encoding='utf-8')
     TOOLS_SCHEMA = json.loads(TS if os.name == 'nt' else TS.replace('powershell', 'bash'))
 load_tool_schema()
 
 lang_suffix = '_en' if os.environ.get('GA_LANG', '') == 'en' else ''
-mem_dir = os.path.join(script_dir, 'memory')
-if not os.path.exists(mem_dir): os.makedirs(mem_dir)
-mem_txt = os.path.join(mem_dir, 'global_mem.txt')
-if not os.path.exists(mem_txt): open(mem_txt, 'w', encoding='utf-8').write('# [Global Memory - L2]\n')
-mem_insight = os.path.join(mem_dir, 'global_mem_insight.txt')
-if not os.path.exists(mem_insight):
-    t = os.path.join(script_dir, f'assets/global_mem_insight_template{lang_suffix}.txt')
-    open(mem_insight, 'w', encoding='utf-8').write(open(t, encoding='utf-8').read() if os.path.exists(t) else '')
-cdp_cfg = os.path.join(script_dir, 'assets/tmwd_cdp_bridge/config.js')
-if not os.path.exists(cdp_cfg):
+mem_dir = memory_path()
+mem_dir.mkdir(parents=True, exist_ok=True)
+mem_txt = memory_path('global_mem.txt')
+if not mem_txt.exists(): mem_txt.write_text('# [Global Memory - L2]\n', encoding='utf-8')
+mem_insight = memory_path('global_mem_insight.txt')
+if not mem_insight.exists():
+    t = asset_path(f'global_mem_insight_template{lang_suffix}.txt')
+    mem_insight.write_text(t.read_text(encoding='utf-8') if t.exists() else '', encoding='utf-8')
+cdp_cfg = runtime_asset_path('tmwd_cdp_bridge', 'config.js')
+if not cdp_cfg.exists():
     try:
-        os.makedirs(os.path.dirname(cdp_cfg), exist_ok=True)
-        open(cdp_cfg, 'w', encoding='utf-8').write(f"const TID = '__ljq_{hex(random.randint(0, 99999999))[2:8]}';")
+        cdp_cfg.parent.mkdir(parents=True, exist_ok=True)
+        cdp_cfg.write_text(f"const TID = '__ljq_{hex(random.randint(0, 99999999))[2:8]}';", encoding='utf-8')
     except Exception as e: print(f'[WARN] CDP config init failed: {e} — advanced web features (tmwebdriver) will be unavailable.')
 
 def get_system_prompt():
-    with open(os.path.join(script_dir, f'assets/sys_prompt{lang_suffix}.txt'), 'r', encoding='utf-8') as f: prompt = f.read()
+    with asset_path(f'sys_prompt{lang_suffix}.txt').open('r', encoding='utf-8') as f: prompt = f.read()
     prompt += f"\nToday: {time.strftime('%Y-%m-%d %a')}\n"
     prompt += get_global_memory()
     return prompt
@@ -48,7 +50,7 @@ def get_system_prompt():
 # output2_queue = agent.put_task(prompt2)
 class GenericAgent:
     def __init__(self):
-        os.makedirs(os.path.join(script_dir, 'temp'), exist_ok=True)
+        temp_path().mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
         self.task_dir = None
         self.history = []; self.handler = None; 
@@ -58,7 +60,7 @@ class GenericAgent:
         self.peer_hint = True
         self.force_non_stream = False
         logid = f'{(time.time_ns() + random.randrange(1_000_000)) % 1_000_000:06d}'
-        self.log_path = os.path.join(script_dir, f'temp/model_responses/model_responses_{logid}.txt')
+        self.log_path = str(temp_path('model_responses', f'model_responses_{logid}.txt'))
         self.load_llm_sessions()
         self.extra_sys_prompts = []
         self.intervene = self.extrakeyinfo = None
@@ -122,7 +124,7 @@ class GenericAgent:
         if not raw_query.startswith('/'): return raw_query
         if _sm := re.match(r'/session\.(\w+)=(.*)', raw_query.strip()):
             k, v = _sm.group(1), _sm.group(2)
-            vfile = os.path.join(script_dir, 'temp', v)
+            vfile = str(temp_path(v))
             if os.path.isfile(vfile): v = open(vfile, encoding='utf-8').read().strip()
             try: v = json.loads(v)  # cover number parsing
             except (json.JSONDecodeError, ValueError): pass
@@ -143,14 +145,14 @@ class GenericAgent:
                 self.task_queue.task_done(); continue
             self.is_running = True
             if len(raw_query) > 2000:
-                task_file = os.path.join(script_dir, 'temp', f'user_prompt_{int(time.time())}.md')
+                task_file = str(temp_path(f'user_prompt_{int(time.time())}.md'))
                 with open(task_file, 'w', encoding='utf-8') as f: f.write(raw_query)
                 raw_query = f'Long user prompt saved to {task_file}. Read and execute.'
             rquery = smart_format(raw_query.replace('\n', ' '), max_str_len=200)
             self.history.append(f"[USER]: {rquery}")
             sys_prompt = get_system_prompt() + '\n'.join(self.extra_sys_prompts) + getattr(self.llmclient.backend, 'extra_sys_prompt', '')
             if self.peer_hint: sys_prompt += f"\n[Peer] 用户提及其他会话/后台任务状态时: temp/model_responses/ (只找近期修改的文件尾部)\n"
-            handler = GenericAgentHandler(self, self.history, os.path.join(script_dir, 'temp'))
+            handler = GenericAgentHandler(self, self.history, str(temp_path()))
             if getattr(self, 'no_print', False): handler.print = lambda *a, **k: None
             if self.handler and 'key_info' in self.handler.working: 
                 ki = re.sub(r'\n\[SYSTEM\] 此为.*?工作记忆[。\n]*', '', self.handler.working['key_info'])  # 去旧
@@ -212,11 +214,11 @@ if __name__ == '__main__':
         import subprocess, platform
         cmd = [sys.executable, os.path.abspath(__file__)] + [a for a in sys.argv[1:]] + ['--nobg']
         if args.task:
-            d = os.path.join(script_dir, f'temp/{args.task}'); os.makedirs(d, exist_ok=True)
+            d = str(temp_path(args.task)); os.makedirs(d, exist_ok=True)
             out = open(os.path.join(d, 'stdout.log'), 'w', encoding='utf-8')
             err = open(os.path.join(d, 'stderr.log'), 'w', encoding='utf-8')
         else: out, err = subprocess.DEVNULL, subprocess.DEVNULL
-        p = subprocess.Popen(cmd, cwd=script_dir,
+        p = subprocess.Popen(cmd, cwd=str(temp_path()),
             creationflags=0x08000000 if platform.system() == 'Windows' else 0,
             stdout=out, stderr=err)
         print('PID:', p.pid); sys.exit(0)
@@ -229,7 +231,9 @@ if __name__ == '__main__':
 
     histfile = args.history
     if args.task:
-        agent.task_dir = d = os.path.join(script_dir, f'temp/{args.task}'); nround = ''
+        agent.peer_hint = False
+        agent.force_non_stream = True
+        agent.task_dir = d = str(temp_path(args.task)); nround = ''
         infile = os.path.join(d, 'input.txt'); outfile = f'{d}/output{nround}.txt'
         if args.input:
             os.makedirs(d, exist_ok=True)
@@ -287,7 +291,7 @@ if __name__ == '__main__':
                 except Exception as e:
                     if getattr(mod, 'ONCE', False): raise
                     print(f'[Reflect] drain error: {e}'); result = f'[ERROR] {e}'
-                log_dir = os.path.join(script_dir, 'temp/reflect_logs'); os.makedirs(log_dir, exist_ok=True)
+                log_dir = str(temp_path('reflect_logs')); os.makedirs(log_dir, exist_ok=True)
                 script_name = os.path.splitext(os.path.basename(args.reflect))[0]
                 open(os.path.join(log_dir, f'{script_name}_{datetime.now():%Y-%m-%d}.log'), 'a', encoding='utf-8').write(f'[{datetime.now():%m-%d %H:%M}]\n{result}\n\n')
                 if (on_done := getattr(mod, 'on_done', None)):

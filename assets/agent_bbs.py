@@ -2,7 +2,8 @@
 # 启动: uvicorn agent_bbs:app --host 0.0.0.0 --port 58800
 # 或: python agent_bbs.py
 
-import sqlite3, uuid, time, json, os
+import sqlite3, uuid, time, json, os, sys
+from pathlib import Path
 from threading import Lock, Thread
 from fastapi import FastAPI, HTTPException, Query, Body, UploadFile, File
 from fastapi.responses import JSONResponse, HTMLResponse, PlainTextResponse, FileResponse
@@ -11,9 +12,29 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+APP_ROOT = Path(__file__).resolve().parents[1]
+if str(APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(APP_ROOT))
+
+def _argv_value(flag):
+    for i, arg in enumerate(sys.argv):
+        if arg == flag and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+        if arg.startswith(flag + "="):
+            return arg.split("=", 1)[1]
+    return None
+
+_cli_cwd = _argv_value("--cwd")
+if _cli_cwd:
+    os.environ["GENERICAGENT_HOME"] = _cli_cwd
+
+from ga_paths import boards_path, bbs_files_path, ensure_runtime_dirs
+
+ensure_runtime_dirs()
+
 # key → board config; 修改 boards.json 可热重载新增板块
-BOARDS_FILE = "boards.json"
-DEFAULT_BOARDS = {"agent-bbs-test": {"name": "default", "db": "agent_bbs.db"}}
+BOARDS_FILE = str(boards_path())
+DEFAULT_BOARDS = {"agent-bbs-test": {"name": "default", "db": str(bbs_files_path("agent_bbs.db"))}}
 BOARDS, BOARDS_MTIME_NS, BOARDS_LOCK = DEFAULT_BOARDS, None, Lock()
 _T=[time.time()]
 
@@ -35,7 +56,7 @@ def load_boards_if_changed():
         except Exception as e: print(f"[boards] reload failed, keep old config: {e}")
         return BOARDS
 
-UPLOAD_DIR = "bbs_files"
+UPLOAD_DIR = str(bbs_files_path())
 
 app = FastAPI(title="Agent BBS", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -221,5 +242,5 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(); p.add_argument("--cwd"); p.add_argument("--port", type=int, default=58800); p.add_argument("--key")
     a = p.parse_args();
     if a.cwd: os.chdir(a.cwd)
-    if a.key: BOARDS_FILE = None; BOARDS.clear(); BOARDS[a.key] = {"name": "default", "db": f"{a.key}.db"}; Thread(target=lambda:[time.sleep(3600) or time.time()-_T[0]>172800 and os._exit(0) for _ in iter(int,1)],daemon=True).start()
+    if a.key: BOARDS_FILE = None; BOARDS.clear(); BOARDS[a.key] = {"name": "default", "db": str(bbs_files_path(f'{a.key}.db'))}; Thread(target=lambda:[time.sleep(3600) or time.time()-_T[0]>172800 and os._exit(0) for _ in iter(int,1)],daemon=True).start()
     uvicorn.run(app, host="0.0.0.0", port=a.port)
