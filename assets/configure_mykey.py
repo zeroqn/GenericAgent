@@ -468,6 +468,7 @@ PLATFORMS = [
         'name': '微信 (iLink 协议)',
         'desc': '通过微信个人号与 Agent 对话，扫码自动登录',
         'file': 'frontends/wechatapp.py',
+        'launch_cmd': 'ga wechat',
         'deps': ['requests', 'qrcode', 'pycryptodome'],
         'env_vars': [],
     },
@@ -1104,7 +1105,11 @@ def generate_mykey(llm_cfgs, platform_configs):
     if platform_configs:
         for pc in platform_configs:
             p = pc['platform']
-            lines.append(f"#  或: python {p['file']}  ({p['name']})")
+            if p.get('launch_cmd'):
+                lines.append(f"#  或: {p['launch_cmd']}  ({p['name']}，推荐使用已有 ga 入口)")
+                lines.append(f"#      备用: python {p['file']}")
+            else:
+                lines.append(f"#  或: python {p['file']}  ({p['name']})")
     lines.append("# ══════════════════════════════════════════════════════════════════════════════")
 
     return '\n'.join(lines)

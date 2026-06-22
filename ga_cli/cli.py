@@ -88,6 +88,16 @@ COMMANDS = {
         "desc": "以原生窗口形式包装 stapp Web 界面（基于 pywebview）",
         "cmd": ["python", "{PROJECT_DIR}/launch.pyw"],
     },
+    "wechat": {
+        "help": "启动微信 Bot（等价于 ga launch --wechat）",
+        "desc": "通过现有 launch.pyw 入口启动微信个人号 Bot；不要为 wechatapp.py 新建 wrapper",
+        "cmd": ["python", "{PROJECT_DIR}/launch.pyw", "--wechat"],
+    },
+    "wx": {
+        "help": "启动微信 Bot (alias: wechat)",
+        "desc": "ga wechat 的短别名",
+        "cmd": ["python", "{PROJECT_DIR}/launch.pyw", "--wechat"],
+    },
     "status": {
         "help": "检查运行状态",
         "desc": "检查当前是否已有 GenericAgent 进程在运行",
@@ -169,6 +179,7 @@ def main():
               ga tui3              启动终端 TUI (v3 scrollback-first)
               ga pet               启动桌面宠物 v2
               ga launch            启动 webview 桌面壳
+              ga wechat            启动微信 Bot（已有入口，勿新建 wrapper）
               ga list              列出所有命令
         """),
     )
