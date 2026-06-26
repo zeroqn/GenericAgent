@@ -1417,11 +1417,13 @@ from at_complete import get_index, fuzzy_rank, find_at_token, format_pick, candi
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
+from ga_paths import temp_path
+
 FRONTENDS_DIR = os.path.dirname(os.path.abspath(__file__))
 if FRONTENDS_DIR not in sys.path:
     sys.path.insert(0, FRONTENDS_DIR)
 
-_TASK_DIR_GLOB = os.path.join(FRONTENDS_DIR, '..', 'temp', '_tui_v2_*')
+_TASK_DIR_GLOB = str(temp_path('_tui_v2_*'))
 
 
 def _rmdir_if_empty(path: Optional[str]) -> None:
@@ -3668,7 +3670,7 @@ class GenericAgentTUI(App[None]):
         except Exception: pass
         try: workspace_cmd.session_map_prune()  # drop session→ws entries whose log is gone
         except Exception: pass
-        get_index(os.path.join(ROOT_DIR, "temp")).warm()   # @ 补全：预热未绑时的默认根（temp）
+        get_index(str(temp_path())).warm()   # @ 补全：预热未绑时的默认根（runtime temp）
         self.add_session("main")
         self._system(f"Welcome to GenericAgent TUI. 按 / 唤起命令面板，{fmt_key('ctrl+n')} 新建会话。")
 
@@ -3775,8 +3777,7 @@ class GenericAgentTUI(App[None]):
         # empty `temp/_tui_v2_<pid>_<id>` behind for every session that never
         # used intervene; `consume_file` tolerates a missing dir.
         try:
-            agent.task_dir = os.path.join(FRONTENDS_DIR, '..', 'temp',
-                                          f'_tui_v2_{os.getpid()}_{agent_id}')
+            agent.task_dir = str(temp_path(f'_tui_v2_{os.getpid()}_{agent_id}'))
         except Exception:
             pass
         try:
@@ -3836,10 +3837,10 @@ class GenericAgentTUI(App[None]):
 
     def _at_root(self, sess: Optional["AgentSession"] = None) -> str:
         # @ 索引根：绑了 workspace 用真实 target；否则用 agent 的实际工作目录
-        # ROOT_DIR/temp（file_read/code_run 都相对它），而非飘忽的 os.getcwd()。
+        # runtime temp（file_read/code_run 都相对它），而非飘忽的 os.getcwd()。
         # 一律真实路径，绝不暴露哈希 junction 名。
         s = sess or (self.sessions.get(self.current_id) if self.current_id is not None else None)
-        return (s.workspace_path if s and s.workspace_path else os.path.join(ROOT_DIR, "temp"))
+        return (s.workspace_path if s and s.workspace_path else str(temp_path()))
 
     _write_snapshot_hook_installed = False
 

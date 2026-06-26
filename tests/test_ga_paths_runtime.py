@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import sys
 import subprocess
@@ -92,6 +93,45 @@ class RuntimePathTests(unittest.TestCase):
             self.assertEqual([Path(item[0]) for item in sessions], [log_path])
             self.assertEqual(sessions[0][2], "hello runtime history")
             self.assertEqual(sessions[0][3], 1)
+
+    def test_continue_lists_empty_rewind_sessions_from_runtime_root(self):
+        with tempfile.TemporaryDirectory() as d:
+            ga_paths, modules = self.reload_runtime_modules(Path(d))
+            continue_cmd = modules["frontends.continue_cmd"]
+            ga_paths.ensure_runtime_dirs()
+            log_path = ga_paths.temp_path("model_responses", "model_responses_424242.txt")
+            log_path.write_text("", encoding="utf-8")
+            tree_dir = ga_paths.temp_path(".ga_rewind", "model_responses_424242")
+            tree_dir.mkdir(parents=True)
+            (tree_dir / "tree.json").write_text(
+                json.dumps(
+                    {
+                        "nodes": {
+                            "origin": {"kind": "origin", "title": "会话起点"},
+                            "v1": {"kind": "checkpoint", "title": "lost history session"},
+                        },
+                        "head": "v1",
+                        "root": "origin",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            sessions = continue_cmd.list_sessions(rewind_root=str(ga_paths.temp_path(".ga_rewind")))
+
+            self.assertEqual([Path(item[0]) for item in sessions], [log_path])
+            self.assertEqual(sessions[0][2], "[世界线] lost history session")
+            self.assertEqual(sessions[0][3], 1)
+
+    def test_tui2_uses_runtime_temp_path_authority(self):
+        source = Path("frontends/tuiapp_v2.py").read_text(encoding="utf-8")
+
+        self.assertIn("from ga_paths import temp_path", source)
+        self.assertIn("temp_path('.ga_rewind')", source)
+        self.assertNotIn("FRONTENDS_DIR, '..', 'temp'", source)
+        self.assertNotIn('ROOT_DIR, "temp"', source)
+        self.assertNotIn("ROOT_DIR, 'temp'", source)
 
     def test_session_names_sidecar_lives_under_runtime_root(self):
         with tempfile.TemporaryDirectory() as d:
