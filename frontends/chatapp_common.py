@@ -1,4 +1,5 @@
 import ast, asyncio, glob, json, os, queue as Q, re, socket, sys, time
+from ga_paths import temp_path
 
 # 确保能导入上级目录的模块（如 agentmain）
 _parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -38,10 +39,9 @@ def build_help_text(commands=HELP_COMMANDS):
 HELP_TEXT = build_help_text()
 FILE_HINT = "If you need to show files to user, use [FILE:filepath] in your response."
 TAG_PATS = [r"<" + t + r">.*?</" + t + r">" for t in ("thinking", "summary", "tool_use", "file_content")]
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESTORE_GLOBS = (
-    os.path.join(PROJECT_ROOT, "temp", "model_responses", "model_responses_*.txt"),
-    os.path.join(PROJECT_ROOT, "temp", "model_responses_*.txt"),
+    str(temp_path("model_responses", "model_responses_*.txt")),
+    str(temp_path("model_responses_*.txt")),
 )
 RESTORE_BLOCK_RE = re.compile(
     r"^=== (Prompt|Response) ===.*?\n(.*?)(?=^=== (?:Prompt|Response) ===|\Z)",

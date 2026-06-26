@@ -7,7 +7,7 @@ Project Mode = 跨会话保持项目认知的工作模式
 
 ## 进入
 
-锚 = `./.active_project.<宿主pid>`，只对当前 GA 进程有效：GA 关闭即自动失活；多开 GA 各自激活不同项目，互不干扰。（下文路径一律以 cwd 为基准，cwd 即 GA 的 temp 目录；禁写 `temp/xxx` 前缀，会嵌套出 temp/temp）
+锚 = `./.active_project.<宿主pid>`，只对当前 GA 进程有效：GA 关闭即自动失活；多开 GA 各自激活不同项目，互不干扰。（下文路径一律以 cwd 为基准，cwd 即 GA 的 runtime temp 目录；禁写 `temp/xxx` 前缀，会嵌套出 temp/temp）
 
 - 用户只说「进入项目模式」未指明项目：列出 `./projects/` 下各项目（名字 + memory 行数 + 最后修改时间），ask_user 让用户选定后再继续
 - 用户明确说「进入/切换到 <项目名> 项目」：视为已确认，直接执行：

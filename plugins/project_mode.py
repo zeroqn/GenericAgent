@@ -6,21 +6,21 @@
 由模型按 L1 中的指针与线索（行数/大小）自行判断是否用 file 工具读取。
 利用 messages 是 list 引用的事实，直接 mutate 即反映到真正发给 LLM 的内容。
 
-激活态载体 = 文件锚 temp/.active_project.<宿主pid>（存当前项目名）。PID 键控：
+激活态载体 = 文件锚 runtime temp/.active_project.<宿主pid>（存当前项目名）。PID 键控：
   - 锚只对写它的那个 GA 进程有效 → 多开 GA 各自激活不同项目，互不可见
   - GA 关闭即自动失活（重启后 pid 变，旧锚作废）；重新激活需经用户确认（SOP 指示）
   - 进入：agent 读 project_mode_sop，经用户确认后写锚（code_run 中 os.getppid() 即宿主 pid）
   - 退出：删除该文件。插件加载时清扫旧版无后缀锚与自己 pid 的前世残留（不碰他进程的锚）
 
 目录约定：
-  temp/projects/<项目名>/project_memory.md   单文件全文注入的项目记忆
-  temp/projects/<项目名>/                     项目私域文件（todo 等），解决多项目覆盖
+  <runtime>/temp/projects/<项目名>/project_memory.md   单文件全文注入的项目记忆
+  <runtime>/temp/projects/<项目名>/                     项目私域文件（todo 等），解决多项目覆盖
 """
 import os
+from ga_paths import temp_path
 import plugins.hooks as hooks
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_TEMP = os.path.join(_PROJECT_ROOT, 'temp')
+_TEMP = str(temp_path())
 _ANCHOR = os.path.join(_TEMP, f'.active_project.{os.getpid()}')
 
 

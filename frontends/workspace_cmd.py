@@ -3,13 +3,13 @@
 设计要点(详见对话设计稿):
   * **兼容旧入口** `plugins/project_mode.py` 与 `memory/project_mode_sop.md` 的 pid 锚。
     前端在
-    `<repo>/temp/projects/<name>` 建一个指向用户真实绝对路径的目录联接(junction),
-    并可按需写激活锚 `<repo>/temp/.active_project.<pid>`。project_mode 插件
+    `<runtime>/temp/projects/<name>` 建一个指向用户真实绝对路径的目录联接(junction),
+    并可按需写激活锚 `<runtime>/temp/.active_project.<pid>`。project_mode 插件
     照常每轮注入 L1,并把 project_memory.md / 产物经 junction 写进真实仓库根
     (与 Claude Code 在仓库根放 CLAUDE.md 同理,已接受)。
-  * **路径基准必须与插件一致**:插件的 `_TEMP` 是基于其 `__file__` 的 `<repo>/temp`
-    绝对路径(非 cwd)。本模块也从自身 `__file__` 推 `<repo>/temp`(frontends/ 的上一级
-    即 repo 根),两边独立计算但结果一致,互不 import。
+  * **路径基准必须与插件一致**:本模块与插件都通过 `ga_paths.temp_path()`
+    指向 writable runtime temp。源码运行且未设置 `GENERICAGENT_HOME` 时仍退回
+    app/root temp,保持旧开发布局。
   * **pid 语义**:插件读 `os.getpid()`(GA 进程)。前端就跑在 GA 进程里,写锚同样用
     `os.getpid()`(不是 SOP 里 code_run 子进程用的 getppid)。
   * **命名** `name = f"{basename}-{hash8}"`,hash8 = blake2b(规范化绝对路径)[:8]。
@@ -31,15 +31,14 @@ import sys
 import time
 from typing import Optional
 
+from ga_paths import temp_path
+
 
 # --------------------------------------------------------------------------- #
 # 路径基准(与 plugins/project_mode.py 的 _TEMP 保持一致)
 # --------------------------------------------------------------------------- #
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
 def _temp_root() -> str:
-    return os.path.join(_REPO_ROOT, "temp")
+    return str(temp_path())
 
 
 def _projects_root() -> str:

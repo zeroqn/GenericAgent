@@ -3,6 +3,7 @@ Format A (JSON): kept as-is.  Format B (Raw): strip sys prompt & assistant echo.
 """
 import re, os, json, ast
 from datetime import datetime
+from ga_paths import temp_path
 
 L4_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -236,7 +237,7 @@ def batch_process(src, l4_dir=None, dry_run=True):
     return report
 
 # ── CLI ──
-RAW_DIR = os.path.join(os.path.dirname(os.path.dirname(L4_DIR)), 'temp', 'model_responses')
+RAW_DIR = str(temp_path('model_responses'))
 
 if __name__ == '__main__':
     import argparse
