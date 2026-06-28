@@ -133,6 +133,31 @@ class RuntimePathTests(unittest.TestCase):
         self.assertNotIn('ROOT_DIR, "temp"', source)
         self.assertNotIn("ROOT_DIR, 'temp'", source)
 
+
+    def test_continue_does_not_hide_non_native_logs_without_summary(self):
+        with tempfile.TemporaryDirectory() as d:
+            ga_paths, modules = self.reload_runtime_modules(Path(d))
+            continue_cmd = modules["frontends.continue_cmd"]
+            ga_paths.ensure_runtime_dirs()
+            log_path = ga_paths.temp_path("model_responses", "model_responses_777777.txt")
+            log_path.write_text(
+                "=== Prompt === 2026-06-27 00:00:00\n"
+                "protocol preface\n"
+                "=== USER ===\n"
+                "please keep this legacy session visible\n"
+                "=== ASSISTANT ===\n"
+                "\n"
+                "=== Response === 2026-06-27 00:00:01 model=legacy\n"
+                "plain answer without summary tags\n",
+                encoding="utf-8",
+            )
+
+            sessions = continue_cmd.list_sessions()
+
+            self.assertEqual([Path(item[0]) for item in sessions], [log_path])
+            self.assertEqual(sessions[0][2], "please keep this legacy session visible")
+            self.assertEqual(sessions[0][3], 1)
+
     def test_session_names_sidecar_lives_under_runtime_root(self):
         with tempfile.TemporaryDirectory() as d:
             ga_paths, modules = self.reload_runtime_modules(Path(d))

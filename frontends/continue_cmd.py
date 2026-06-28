@@ -47,18 +47,6 @@ def _first_user(pairs):
     return ''
 
 
-def _last_user(text):
-    """Last real user prompt. Scans `=== Prompt ===` blocks directly (no
-    Prompt/Response pairing, so response-less/aborted sessions still preview),
-    newest-first, returning the first one `_user_text` accepts (it drops
-    tool_result continuations + all _INJECT_MARKERS). Better preview anchor than
-    the first prompt — reflects what the session was most recently about."""
-    for label, body in reversed(_BLOCK_RE.findall(text or '')):
-        if label == 'Prompt':
-            t = _user_text(body)
-            if t:
-                return t
-    return ''
 
 
 def _last_summary(pairs):
@@ -459,6 +447,53 @@ def strip_project_mode(text: str) -> str:
     """剔除用户文本尾部的 project-mode 注入块。"""
     return _PM_BLOCK_RE.sub("", text or "")
 
+
+
+def _plain_user_text(prompt_body):
+    """Best-effort user text from legacy/non-native ToolClient prompt logs.
+
+    Native logs store the prompt body as JSON and are handled by `_user_text`.
+    Non-native ToolClient logs the full protocol prompt as plain text with
+    nested `=== USER === ... === ASSISTANT ===` sections.  Those sessions are
+    still restorable, so `/continue` must not hide them just because they lack
+    a model `<summary>`.
+    """
+    body = prompt_body or ''
+    matches = re.findall(r'^=== USER ===\s*\n(.*?)(?=^=== (?:USER|ASSISTANT) ===|\Z)',
+                         body, re.DOTALL | re.MULTILINE)
+    candidates = list(reversed(matches)) if matches else [body]
+    for cand in candidates:
+        cand = re.sub(r'<tool_result>.*?</tool_result>', '', cand, flags=re.DOTALL)
+        cand = strip_project_mode(cand).strip()
+        if '### 用户当前消息' in cand:
+            cand = cand.split('### 用户当前消息', 1)[-1].strip()
+        lines = []
+        for line in cand.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if any(mk in line for mk in _INJECT_MARKERS):
+                continue
+            if line.startswith(('=== ', '---', 'If you need to show files to user,')):
+                continue
+            lines.append(line)
+        if lines:
+            return lines[0]
+    return ''
+
+
+def _last_user(text):
+    """Last real user prompt. Scans `=== Prompt ===` blocks directly (no
+    Prompt/Response pairing, so response-less/aborted sessions still preview),
+    newest-first, returning the first one `_user_text` accepts (it drops
+    tool_result continuations + all _INJECT_MARKERS). Better preview anchor than
+    the first prompt — reflects what the session was most recently about."""
+    for label, body in reversed(_BLOCK_RE.findall(text or '')):
+        if label == 'Prompt':
+            t = _user_text(body) or _plain_user_text(body)
+            if t:
+                return t
+    return ''
 
 def _user_text(prompt_body):
     """User-typed text from a prompt JSON; '' if this is an agent auto-continuation.
