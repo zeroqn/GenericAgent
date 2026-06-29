@@ -22,12 +22,39 @@ def _rel_time(mtime):
     if d < 86400: return f'{d // 3600}小时前'
     return f'{d // 86400}天前'
 
-def _pairs(content):
-    blocks, pairs, pending = _BLOCK_RE.findall(content or ''), [], None
-    for label, body in blocks:
-        if label == 'Prompt': pending = body.strip()
+def _iter_blocks(content):
+    for match in _BLOCK_RE.finditer(content or ''):
+        yield match.group(1), match.group(2), match.start(), match.end()
+
+
+def _draft_text_from_prompt(prompt_body):
+    try:
+        parsed = json.loads(prompt_body or '')
+    except Exception:
+        return (_plain_user_text(prompt_body) or '').strip()
+    if isinstance(parsed, dict):
+        return (_user_text(prompt_body) or '').strip()
+    return (_plain_user_text(prompt_body) or '').strip()
+
+
+def _completed_pairs_and_tail(content):
+    pairs, pending = [], None
+    for label, body, start, _end in _iter_blocks(content):
+        if label == 'Prompt':
+            pending = (body.strip(), start)
         elif pending is not None:
-            pairs.append((pending, body.strip())); pending = None
+            pairs.append((pending[0], body.strip()))
+            pending = None
+    draft, tail_start = '', None
+    if pending is not None:
+        draft = _draft_text_from_prompt(pending[0])
+        if draft:
+            tail_start = pending[1]
+    return pairs, draft, tail_start
+
+
+def _pairs(content):
+    pairs, _draft, _tail_start = _completed_pairs_and_tail(content)
     return pairs
 
 def _first_user(pairs):
@@ -105,6 +132,85 @@ def _parse_native_history(pairs):
         history.append(user_msg)
         history.append({'role': 'assistant', 'content': blocks})
     return history
+
+
+def _read_text(path):
+    with open(path, encoding='utf-8', errors='replace') as fh:
+        return fh.read()
+
+
+def _clear_continue_draft(agent):
+    for attr in ('_continue_draft', '_continue_draft_trimmed', '_continue_incomplete'):
+        try:
+            setattr(agent, attr, '' if attr == '_continue_draft' else False)
+        except Exception:
+            pass
+
+
+def _set_continue_draft(agent, draft, trimmed=False):
+    try: setattr(agent, '_continue_draft', draft or '')
+    except Exception: pass
+    try: setattr(agent, '_continue_draft_trimmed', bool(trimmed))
+    except Exception: pass
+    try: setattr(agent, '_continue_incomplete', bool(draft))
+    except Exception: pass
+
+
+def session_draft_tail(path):
+    try:
+        content = _read_text(path)
+    except Exception:
+        return ''
+    _completed, draft, _tail_start = _completed_pairs_and_tail(content)
+    return draft or ''
+
+
+def session_has_draft_tail(path):
+    return bool(session_draft_tail(path))
+
+
+def format_round_label(rounds, has_draft=False):
+    try:
+        n = int(rounds or 0)
+    except Exception:
+        n = 0
+    if has_draft:
+        return f'{n}轮 + draft' if n > 0 else 'draft'
+    return f'{n}轮'
+
+
+def session_round_label(path, rounds):
+    return format_round_label(rounds, session_has_draft_tail(path))
+
+
+def _invalidate_rounds_cache(path):
+    global _rounds_cache_dirty
+    if _rounds_cache is None:
+        return
+    key = _rounds_cache_key(path)
+    if key in _rounds_cache:
+        _rounds_cache.pop(key, None)
+        _rounds_cache_dirty = True
+
+
+def _trim_incomplete_tail(path, tail_start):
+    if tail_start is None:
+        return False
+    try:
+        content = _read_text(path)
+    except Exception:
+        return False
+    if not (0 <= int(tail_start) <= len(content)):
+        return False
+    new_content = content[:int(tail_start)].rstrip()
+    if new_content:
+        new_content += '\n'
+    if new_content == content:
+        return False
+    with open(path, 'w', encoding='utf-8', errors='replace') as fh:
+        fh.write(new_content)
+    _invalidate_rounds_cache(path)
+    return True
 
 
 _PREVIEW_WIN = 32 * 1024
@@ -283,13 +389,50 @@ def _rounds_for_file(path, st):
     return n, key
 
 
-def list_sessions(exclude_pid=None, exclude_log=None):
+def _rewind_preview_for_log(log_path, rewind_root):
+    """Return a lightweight preview for an empty log backed by a rewind tree.
+
+    Latest main removed the TUI worldline integration, but persona still needs
+    empty runtime logs with a persisted `.ga_rewind/<logid>/tree.json` to stay
+    visible in `/continue` so incomplete/rewound sessions are not lost.
+    """
+    if not rewind_root:
+        return None
+    key = os.path.splitext(os.path.basename(log_path))[0]
+    tree_path = os.path.join(rewind_root, key, 'tree.json')
+    try:
+        with open(tree_path, encoding='utf-8') as fh:
+            tree = json.load(fh)
+    except Exception:
+        return None
+    nodes = tree.get('nodes') if isinstance(tree, dict) else None
+    if not isinstance(nodes, dict):
+        return None
+    head = tree.get('head') or tree.get('current') or tree.get('root')
+    node = nodes.get(head) if head in nodes else None
+    if not isinstance(node, dict):
+        non_origin = [n for n in nodes.values()
+                      if isinstance(n, dict) and n.get('kind') != 'origin']
+        node = non_origin[-1] if non_origin else None
+    title = (node or {}).get('title') or ''
+    if not title:
+        return None
+    rounds = max(1, sum(1 for n in nodes.values()
+                        if isinstance(n, dict) and n.get('kind') != 'origin'))
+    return f'[世界线] {title}', rounds
+
+
+def list_sessions(exclude_pid=None, exclude_log=None, rewind_root=None):
     """Newest-first list of (path, mtime, preview_text, n_rounds). Preview uses head/tail window only.
 
     `exclude_log` (basename, e.g. 'model_responses_123456.txt') drops the caller's
     OWN current session — preferred over `exclude_pid`, which assumed the log file
     was named by PID (it isn't: agentmain mints a random 6-digit logid), so the
-    pid tag never matched and the current session leaked into its own list."""
+    pid tag never matched and the current session leaked into its own list.
+
+    `rewind_root` is an optional runtime `.ga_rewind` root used only to keep
+    empty-but-rewindable logs discoverable.
+    """
     files = glob.glob(_LOG_GLOB)
     if exclude_pid is not None:
         tag = f'model_responses_{exclude_pid}.txt'
@@ -305,11 +448,16 @@ def list_sessions(exclude_pid=None, exclude_log=None):
         except OSError:
             continue
         if sz < 32:
-            continue
-        preview = _preview_from_file(f)
-        if not preview:
-            continue
-        rounds, key = _rounds_for_file(f, st)
+            rewind_preview = _rewind_preview_for_log(f, rewind_root)
+            if not rewind_preview:
+                continue
+            preview, rounds = rewind_preview
+            key = _rounds_cache_key(f)
+        else:
+            preview = _preview_from_file(f)
+            if not preview:
+                continue
+            rounds, key = _rounds_for_file(f, st)
         valid_keys.append(key)
         out.append((f, mtime, preview, rounds))
     _save_rounds_cache(valid_keys)
@@ -386,32 +534,73 @@ def reset_conversation(agent, message='🆕 已开启新对话，当前上下文
 def format_list(sessions, limit=20):
     if not sessions: return '❌ 没有可恢复的历史会话'
     lines = ['**可恢复会话**（输入 `/continue N` 恢复第 N 个）：', '']
-    for i, (_, mtime, first, n) in enumerate(sessions[:limit], 1):
+    for i, (path, mtime, first, n) in enumerate(sessions[:limit], 1):
         preview = _escape_md((first or '（无法预览）').replace('\n', ' ')[:60])
-        lines.append(f'{i}. `{_rel_time(mtime)}` · **{n} 轮** · {preview}')
+        label = _escape_md(session_round_label(path, n))
+        lines.append(f'{i}. `{_rel_time(mtime)}` · **{label}** · {preview}')
     return '\n'.join(lines)
 
-def restore(agent, path):
-    """Restore session at path. Returns (msg, is_full)."""
-    try:
-        with open(path, encoding='utf-8', errors='replace') as fh:
-            content = fh.read()
-    except Exception as e: return f'❌ 读取失败: {e}', False
-    pairs = _pairs(content)
-    if not pairs: return f'❌ {os.path.basename(path)} 为空或格式不符', False
-    history = _parse_native_history(pairs)
+
+def _restore_history_from_content(agent, path, content, *, abort=False, trim_tail=False):
+    _clear_continue_draft(agent)
+    pairs, draft, tail_start = _completed_pairs_and_tail(content)
     name = os.path.basename(path)
-    if history is not None:
-        agent.abort()
-        _replace_backend_history(agent, history)
-        return f'✅ 已恢复 {len(pairs)} 轮完整对话（{name}）\n(已写入 backend.history，可直接继续)', True
-    from chatapp_common import _restore_native_history, _restore_text_pairs
-    summary = _restore_text_pairs(content) or _restore_native_history(content)
-    if not summary: return f'❌ {name} 无法解析（非 native 且无摘要可提取）', False
-    agent.abort()
-    agent.history.extend(summary)
-    n = sum(1 for l in summary if l.startswith('[USER]: '))
-    return f'⚠️ 非 native 格式，已降级恢复 {n} 轮摘要（{name}）\n(请输入新问题继续)', False
+    if not pairs and not draft:
+        return f'❌ {name} 为空或格式不符', False
+
+    def _maybe_abort():
+        if abort:
+            try: agent.abort()
+            except Exception: pass
+
+    def _apply_draft():
+        trimmed = _trim_incomplete_tail(path, tail_start) if (trim_tail and draft) else False
+        _set_continue_draft(agent, draft, trimmed)
+        return trimmed
+
+    if pairs:
+        history = _parse_native_history(pairs)
+        if history is not None:
+            _maybe_abort()
+            _replace_backend_history(agent, history)
+            _apply_draft()
+            if draft:
+                return f'✅ 已恢复 {len(pairs)} 轮完整对话，并恢复草稿（{name}）', True
+            return f'✅ 已恢复 {len(pairs)} 轮完整对话（{name}）', True
+        from chatapp_common import _restore_native_history, _restore_text_pairs
+        summary = _restore_text_pairs(content) or _restore_native_history(content)
+        if not summary:
+            return f'❌ {name} 无法解析（非 native 且无摘要可提取）', False
+        _maybe_abort()
+        if hasattr(agent, 'history'):
+            agent.history.extend(summary)
+        _apply_draft()
+        n = sum(1 for l in summary if l.startswith('[USER]: '))
+        if draft:
+            return f'⚠️ 非 native 格式，降级恢复 {n} 轮摘要，并恢复草稿（{name}）', False
+        return f'⚠️ 非 native 格式，降级恢复 {n} 轮摘要（{name}）', False
+
+    _maybe_abort()
+    _replace_backend_history(agent, [])
+    if hasattr(agent, 'history'):
+        agent.history = []
+    _apply_draft()
+    return f'✅ 已恢复草稿（{name}）', True
+
+
+def restore(agent, path):
+    """Restore session at path. Returns (msg, is_full). Does not trim source logs."""
+    try:
+        content = _read_text(path)
+    except Exception as e: return f'❌ 读取失败: {e}', False
+    msg, ok = _restore_history_from_content(agent, path, content, abort=True, trim_tail=False)
+    if ok and msg.startswith('✅ 已恢复 ') and 'backend.history' not in msg and '草稿' not in msg:
+        msg += '\n(已写入 backend.history，可直接继续)'
+    elif ok and '草稿' in msg:
+        msg += '\n(已恢复到输入草稿；提交前不会写入 backend.history)'
+    elif msg.startswith('⚠️'):
+        msg += '\n(请输入新问题继续)'
+    return msg, ok
 
 def handle(agent, query, display_queue):
     """Dispatch /continue or /continue N. Returns None if consumed else original query."""
@@ -490,7 +679,7 @@ def _last_user(text):
     the first prompt — reflects what the session was most recently about."""
     for label, body in reversed(_BLOCK_RE.findall(text or '')):
         if label == 'Prompt':
-            t = _user_text(body) or _plain_user_text(body)
+            t = _draft_text_from_prompt(body)
             if t:
                 return t
     return ''
@@ -1024,35 +1213,35 @@ def begin_fresh_session(agent, agent_id=None):
     _clear_conversation_state(agent)
 
 
-def _load_history_into(agent, path):
+def _load_history_into(agent, path, trim_tail=False):
     """把 `path` 解析进 backend.history(native;否则降级摘要)。镜像 restore() 的解析,
-    但不 abort/不快照(日志重指由调用方先做好)。返回 (msg, is_full)。"""
+    但不 abort/不快照(日志重指由调用方先做好)。返回 (msg, ok)。"""
     try:
-        with open(path, encoding='utf-8', errors='replace') as fh:
-            content = fh.read()
+        content = _read_text(path)
     except Exception as e:
+        _clear_continue_draft(agent)
         return f'❌ 读取失败: {e}', False
-    pairs = _pairs(content)
-    if not pairs:
-        return f'❌ {os.path.basename(path)} 为空或格式不符', False
-    history = _parse_native_history(pairs)
-    name = os.path.basename(path)
-    if history is not None:
-        _replace_backend_history(agent, history)
-        return f'✅ 已恢复 {len(pairs)} 轮完整对话（{name}）', True
-    from chatapp_common import _restore_native_history, _restore_text_pairs
-    summary = _restore_text_pairs(content) or _restore_native_history(content)
-    if not summary:
-        return f'❌ {name} 无法解析（非 native 且无摘要可提取）', False
+    return _restore_history_from_content(agent, path, content, abort=False, trim_tail=trim_tail)
+
+
+def _is_empty_log(path):
+    try:
+        return os.path.getsize(path) < 32
+    except OSError:
+        return True
+
+
+def _restore_empty_log(agent):
+    _replace_backend_history(agent, [])
     if hasattr(agent, 'history'):
-        agent.history.extend(summary)
-    n = sum(1 for l in summary if l.startswith('[USER]: '))
-    return f'⚠️ 非 native 格式，降级恢复 {n} 轮摘要（{name}）', False
+        agent.history = []
+    _clear_continue_draft(agent)
 
 
-def continue_inplace(agent, path, agent_id=None):
+def continue_inplace(agent, path, agent_id=None, allow_empty=False):
     """原地续:把 agent 的日志指回 `path` 本身,之后轮次追加到 X,延续同一会话。
     调用方应已确认空闲(session_occupant 为 None);抢锁失败(被占)返回错误。
+    `allow_empty` keeps empty rewind-origin logs restorable as a blank session.
     返回 (msg, ok)。"""
     try: agent.abort()
     except Exception: pass
@@ -1062,12 +1251,17 @@ def continue_inplace(agent, path, agent_id=None):
     if cur and os.path.basename(cur) != os.path.basename(path):
         release_lock(cur)                       # 目标到手,旧会话释放为空闲(同一文件则不放)
     _retarget_log(agent, path)
-    return _load_history_into(agent, path)
+    msg, ok = _load_history_into(agent, path, trim_tail=True)
+    if not ok and allow_empty and _is_empty_log(path):
+        _restore_empty_log(agent)
+        return '✅ 已恢复空会话', True
+    return msg, ok
 
 
-def continue_copy(agent, path, agent_id=None):
+def continue_copy(agent, path, agent_id=None, allow_empty=False):
     """拷贝续:铸新 logid、把 `path` 内容拷进去,在副本上续;`path` 原件不动。
-    用于"被占用→用户选拷贝"以及快照源。返回 (msg, ok)。"""
+    用于"被占用→用户选拷贝"以及快照源。`allow_empty` mirrors
+    continue_inplace for empty rewind-origin logs.返回 (msg, ok)。"""
     try: agent.abort()
     except Exception: pass
     release_current(agent)
@@ -1078,7 +1272,11 @@ def continue_copy(agent, path, agent_id=None):
         pass
     acquire_lock(newp, agent_id)
     _retarget_log(agent, newp)
-    return _load_history_into(agent, newp)
+    msg, ok = _load_history_into(agent, newp, trim_tail=True)
+    if not ok and allow_empty and _is_empty_log(newp):
+        _restore_empty_log(agent)
+        return '✅ 已恢复空会话', True
+    return msg, ok
 
 
 def install(cls):

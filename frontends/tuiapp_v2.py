@@ -5226,13 +5226,20 @@ class GenericAgentTUI(App[None]):
         display_text = raw.strip() if (raw or "").strip() else "/review"
         self.submit_user_message(prompt, display_text=display_text)
 
+    def _rw_rewind_root(self):
+        """Runtime rewind-tree root used by /continue discovery."""
+        return str(temp_path('.ga_rewind'))
+
     def _cmd_continue(self, args, raw):
         sess = self.current
         m = re.match(r"/continue\s+(\S.*?)\s*$", (raw or "").strip())
         if m:
             token = m.group(1)
             if token.isdigit():
-                sessions = continue_list(exclude_log=os.path.basename(getattr(sess.agent, "log_path", "") or ""))
+                sessions = continue_list(
+                    exclude_log=os.path.basename(getattr(sess.agent, "log_path", "") or ""),
+                    rewind_root=self._rw_rewind_root(),
+                )
                 idx = int(token) - 1
                 if not (0 <= idx < len(sessions)):
                     self._system(f"❌ 索引越界（有效范围 1-{len(sessions)}）"); return
@@ -5251,7 +5258,10 @@ class GenericAgentTUI(App[None]):
                 self._system(f"❌ 找不到名为 {token!r} 的会话"); return
             self._do_continue_restore(path)
             return
-        sessions = continue_list(exclude_log=os.path.basename(getattr(sess.agent, "log_path", "") or ""))
+        sessions = continue_list(
+            exclude_log=os.path.basename(getattr(sess.agent, "log_path", "") or ""),
+            rewind_root=self._rw_rewind_root(),
+        )
         if not sessions:
             self._system("❌ 没有可恢复的历史会话"); return
         choices = []
@@ -5259,11 +5269,16 @@ class GenericAgentTUI(App[None]):
             import session_names as _sn
         except Exception:
             _sn = None
+        try:
+            import continue_cmd as _cc
+        except Exception:
+            _cc = None
         for path, mtime, first, n in sessions:
             preview = (first or "（无法预览）").replace("\n", " ").strip()[:50]
             nm = _sn.name_for(path) if _sn else ""
             tag = f"{nm} · " if nm else ""
-            choices.append((f"{_short_age(mtime)} · {tag}{n}轮 · {preview}", path))
+            round_label = _cc.session_round_label(path, n) if _cc else f"{n}轮"
+            choices.append((f"{_short_age(mtime)} · {tag}{round_label} · {preview}", path))
         head = f"选择要恢复的会话 ({len(sessions)} 条 · 输入关键字过滤 · ↑/↓ 移动，→/Enter 确认，Esc 取消)"
         msg = ChatMessage(
             role="system", content=head, kind="choice", choices=choices,
@@ -5316,6 +5331,7 @@ class GenericAgentTUI(App[None]):
             self._system(msg); return msg
         if not ok:
             self._system(result); return result
+        draft = getattr(sess.agent, "_continue_draft", "") or ""
         # 原地:new_log == path(接管原文件);拷贝:new_log 是内容相同的新副本。
         new_log = getattr(sess.agent, "log_path", "") or ""
         def _finish():
@@ -5395,6 +5411,8 @@ class GenericAgentTUI(App[None]):
                 pass
             self._remount_current_session()
             self._refresh_all()
+            if draft:
+                self._rw_prefill_input(draft)
         self.call_after_refresh(_finish)
         return result.splitlines()[0] if result else "✅ 已恢复"
 

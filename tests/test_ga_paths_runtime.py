@@ -223,6 +223,239 @@ class RuntimePathTests(unittest.TestCase):
 
             self.assertEqual(Path(compress_session.RAW_DIR), ga_paths.temp_path("model_responses"))
 
+    class FakeBackend:
+        def __init__(self):
+            self.history = ["stale"]
+
+    class FakeClient:
+        def __init__(self):
+            self.backend = RuntimePathTests.FakeBackend()
+            self.log_path = ""
+            self.last_tools = "stale"
+
+    class FakeAgent:
+        def __init__(self):
+            self.llmclient = RuntimePathTests.FakeClient()
+            self.llmclients = [self.llmclient]
+            self.history = ["stale"]
+            self.log_path = ""
+            self.aborted = False
+
+        def abort(self):
+            self.aborted = True
+
+    def write_native_blocks(self, ga_paths, name, blocks):
+        log_path = ga_paths.temp_path("model_responses", name)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        parts = []
+        for label, body in blocks:
+            parts.append(f"=== {label} ===\n{body}\n")
+        log_path.write_text("".join(parts), encoding="utf-8")
+        return log_path
+
+    def native_prompt(self, text):
+        return json.dumps(
+            {"role": "user", "content": [{"type": "text", "text": text}]},
+            ensure_ascii=False,
+        )
+
+    def native_tool_result_prompt(self):
+        return json.dumps(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"},
+                    {"type": "text", "text": "tool continuation should not draft"},
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+    def native_response(self, text="ok"):
+        return repr([{"type": "text", "text": text}])
+
+    def test_continue_restores_completed_history_and_trailing_prompt_as_draft(self):
+        with tempfile.TemporaryDirectory() as d:
+            ga_paths, modules = self.reload_runtime_modules(Path(d))
+            continue_cmd = modules["frontends.continue_cmd"]
+            ga_paths.ensure_runtime_dirs()
+            log_path = self.write_native_blocks(
+                ga_paths,
+                "model_responses_111111.txt",
+                [
+                    ("Prompt", self.native_prompt("first")),
+                    ("Response", self.native_response("answer")),
+                    ("Prompt", self.native_prompt("unfinished")),
+                ],
+            )
+            original = log_path.read_text(encoding="utf-8")
+            agent = self.FakeAgent()
+
+            msg, ok = continue_cmd.continue_inplace(agent, str(log_path), allow_empty=True)
+
+            self.assertTrue(ok, msg)
+            self.assertEqual(agent.llmclient.backend.history[0]["content"][0]["text"], "first")
+            self.assertEqual(agent.llmclient.backend.history[1]["content"][0]["text"], "answer")
+            self.assertEqual(getattr(agent, "_continue_draft", ""), "unfinished")
+            self.assertTrue(getattr(agent, "_continue_draft_trimmed", False))
+            trimmed = log_path.read_text(encoding="utf-8")
+            self.assertIn('"first"', trimmed)
+            self.assertNotIn('"unfinished"', trimmed)
+            self.assertLess(len(trimmed), len(original))
+
+    def test_continue_restores_prompt_only_log_as_draft_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            ga_paths, modules = self.reload_runtime_modules(Path(d))
+            continue_cmd = modules["frontends.continue_cmd"]
+            ga_paths.ensure_runtime_dirs()
+            log_path = self.write_native_blocks(
+                ga_paths,
+                "model_responses_222222.txt",
+                [("Prompt", self.native_prompt("Say gm"))],
+            )
+
+            sessions = continue_cmd.list_sessions()
+            self.assertEqual(len(sessions), 1)
+            self.assertEqual(sessions[0][2], "Say gm")
+            self.assertEqual(sessions[0][3], 0)
+            self.assertEqual(continue_cmd.session_draft_tail(str(log_path)), "Say gm")
+            self.assertEqual(continue_cmd.session_round_label(str(log_path), 0), "draft")
+
+            agent = self.FakeAgent()
+            msg, ok = continue_cmd.continue_inplace(agent, str(log_path), allow_empty=True)
+
+            self.assertTrue(ok, msg)
+            self.assertEqual(agent.llmclient.backend.history, [])
+            self.assertEqual(getattr(agent, "_continue_draft", ""), "Say gm")
+            self.assertTrue(getattr(agent, "_continue_draft_trimmed", False))
+            self.assertNotIn("Say gm", log_path.read_text(encoding="utf-8"))
+
+    def test_continue_ignores_tool_result_tail_as_draft(self):
+        with tempfile.TemporaryDirectory() as d:
+            ga_paths, modules = self.reload_runtime_modules(Path(d))
+            continue_cmd = modules["frontends.continue_cmd"]
+            ga_paths.ensure_runtime_dirs()
+            log_path = self.write_native_blocks(
+                ga_paths,
+                "model_responses_333333.txt",
+                [
+                    ("Prompt", self.native_prompt("first")),
+                    ("Response", self.native_response("answer")),
+                    ("Prompt", self.native_tool_result_prompt()),
+                ],
+            )
+            before = log_path.read_text(encoding="utf-8")
+            agent = self.FakeAgent()
+
+            msg, ok = continue_cmd.continue_inplace(agent, str(log_path), allow_empty=True)
+
+            self.assertTrue(ok, msg)
+            self.assertEqual(getattr(agent, "_continue_draft", ""), "")
+            self.assertFalse(getattr(agent, "_continue_draft_trimmed", False))
+            self.assertEqual(log_path.read_text(encoding="utf-8"), before)
+
+    def test_continue_copy_trims_only_copied_target(self):
+        with tempfile.TemporaryDirectory() as d:
+            ga_paths, modules = self.reload_runtime_modules(Path(d))
+            continue_cmd = modules["frontends.continue_cmd"]
+            ga_paths.ensure_runtime_dirs()
+            source = self.write_native_blocks(
+                ga_paths,
+                "model_responses_444444.txt",
+                [
+                    ("Prompt", self.native_prompt("first")),
+                    ("Response", self.native_response("answer")),
+                    ("Prompt", self.native_prompt("copy draft")),
+                ],
+            )
+            before = source.read_text(encoding="utf-8")
+            agent = self.FakeAgent()
+
+            msg, ok = continue_cmd.continue_copy(agent, str(source), allow_empty=True)
+
+            self.assertTrue(ok, msg)
+            self.assertEqual(source.read_text(encoding="utf-8"), before)
+            copied = Path(agent.log_path)
+            self.assertNotEqual(copied, source)
+            self.assertNotIn("copy draft", copied.read_text(encoding="utf-8"))
+            self.assertEqual(getattr(agent, "_continue_draft", ""), "copy draft")
+            self.assertEqual(continue_cmd.session_round_label(str(source), 1), "1轮 + draft")
+
+    def test_continue_restore_prompt_only_succeeds_without_trimming(self):
+        with tempfile.TemporaryDirectory() as d:
+            ga_paths, modules = self.reload_runtime_modules(Path(d))
+            continue_cmd = modules["frontends.continue_cmd"]
+            ga_paths.ensure_runtime_dirs()
+            log_path = self.write_native_blocks(
+                ga_paths,
+                "model_responses_555555.txt",
+                [("Prompt", self.native_prompt("restore draft"))],
+            )
+            before = log_path.read_text(encoding="utf-8")
+            agent = self.FakeAgent()
+
+            msg, full = continue_cmd.restore(agent, str(log_path))
+
+            self.assertTrue(full, msg)
+            self.assertEqual(agent.llmclient.backend.history, [])
+            self.assertEqual(getattr(agent, "_continue_draft", ""), "restore draft")
+            self.assertFalse(getattr(agent, "_continue_draft_trimmed", False))
+            self.assertEqual(log_path.read_text(encoding="utf-8"), before)
+
+    def test_continue_complete_native_log_has_no_draft_and_is_not_trimmed(self):
+        with tempfile.TemporaryDirectory() as d:
+            ga_paths, modules = self.reload_runtime_modules(Path(d))
+            continue_cmd = modules["frontends.continue_cmd"]
+            ga_paths.ensure_runtime_dirs()
+            log_path = self.write_native_log(ga_paths, name="model_responses_666666.txt", text="complete only")
+            before = log_path.read_text(encoding="utf-8")
+            agent = self.FakeAgent()
+
+            msg, ok = continue_cmd.continue_inplace(agent, str(log_path), allow_empty=True)
+
+            self.assertTrue(ok, msg)
+            self.assertEqual(getattr(agent, "_continue_draft", ""), "")
+            self.assertFalse(getattr(agent, "_continue_draft_trimmed", False))
+            self.assertEqual(log_path.read_text(encoding="utf-8"), before)
+            self.assertEqual(continue_cmd.session_round_label(str(log_path), 1), "1轮")
+
+    def test_continue_list_shape_and_format_labels_include_draft_state(self):
+        with tempfile.TemporaryDirectory() as d:
+            ga_paths, modules = self.reload_runtime_modules(Path(d))
+            continue_cmd = modules["frontends.continue_cmd"]
+            ga_paths.ensure_runtime_dirs()
+            self.write_native_blocks(
+                ga_paths,
+                "model_responses_777001.txt",
+                [("Prompt", self.native_prompt("draft only"))],
+            )
+            self.write_native_blocks(
+                ga_paths,
+                "model_responses_777002.txt",
+                [
+                    ("Prompt", self.native_prompt("done")),
+                    ("Response", self.native_response("ok")),
+                    ("Prompt", self.native_prompt("tail draft")),
+                ],
+            )
+
+            sessions = continue_cmd.list_sessions()
+            self.assertTrue(all(len(item) == 4 for item in sessions))
+            labels = {Path(path).name: continue_cmd.session_round_label(path, rounds)
+                      for path, _mtime, _preview, rounds in sessions}
+            self.assertEqual(labels["model_responses_777001.txt"], "draft")
+            self.assertEqual(labels["model_responses_777002.txt"], "1轮 + draft")
+            formatted = continue_cmd.format_list(sessions)
+            self.assertIn("**draft**", formatted)
+            self.assertIn("**1轮 + draft**", formatted)
+
+    def test_tui2_continue_uses_shared_draft_label_and_prefill(self):
+        source = Path("frontends/tuiapp_v2.py").read_text(encoding="utf-8")
+
+        self.assertIn("session_round_label(path, n)", source)
+        self.assertIn('getattr(sess.agent, "_continue_draft"', source)
+        self.assertIn("self._rw_prefill_input(draft)", source)
+
 
 if __name__ == "__main__":
     unittest.main()
