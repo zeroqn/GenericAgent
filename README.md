@@ -144,6 +144,7 @@ Then launch:
 ```bash
 python frontends/tui_v3.py   # Terminal UI (recommended)
 python launch.pyw            # Streamlit web UI
+python launch.pyw --headless # Streamlit server only, no desktop GUI
 ```
 
 #### Method 2 — One-line installer *(convenience)*
@@ -214,6 +215,7 @@ TUI rendering on Windows can be flaky depending on terminal + font. Common cause
 
 ```bash
 python launch.pyw
+python launch.pyw --headless  # run the backend server without opening pywebview
 ```
 
 ### Bot Interface (IM)
@@ -227,6 +229,7 @@ GenericAgent also supports IM frontends such as Telegram, Discord, and Lark.
 | Lark / Feishu | `python frontends/fsapp.py` |
 
 > WeChat, QQ, WeCom and DingTalk are also supported — see the Chinese section below.
+> For headless WeChat operation, use `ga wechat-headless` or `python launch.pyw --headless --wechat`.
 > For detailed setup, ask GenericAgent itself.
 
 ---

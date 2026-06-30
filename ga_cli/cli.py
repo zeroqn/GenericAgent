@@ -93,10 +93,20 @@ COMMANDS = {
         "desc": "通过现有 launch.pyw 入口启动微信个人号 Bot；不要为 wechatapp.py 新建 wrapper",
         "cmd": ["python", "{PROJECT_DIR}/launch.pyw", "--wechat"],
     },
+    "wechat-headless": {
+        "help": "无 GUI 启动微信 Bot + 后端服务",
+        "desc": "通过 launch.pyw --headless --wechat 启动微信个人号 Bot 和后端服务，不打开桌面 GUI",
+        "cmd": ["python", "{PROJECT_DIR}/launch.pyw", "--headless", "--wechat"],
+    },
     "wx": {
         "help": "启动微信 Bot (alias: wechat)",
         "desc": "ga wechat 的短别名",
         "cmd": ["python", "{PROJECT_DIR}/launch.pyw", "--wechat"],
+    },
+    "wx-headless": {
+        "help": "无 GUI 启动微信 Bot (alias: wechat-headless)",
+        "desc": "ga wechat-headless 的短别名",
+        "cmd": ["python", "{PROJECT_DIR}/launch.pyw", "--headless", "--wechat"],
     },
     "status": {
         "help": "检查运行状态",
@@ -180,6 +190,7 @@ def main():
               ga pet               启动桌面宠物 v2
               ga launch            启动 webview 桌面壳
               ga wechat            启动微信 Bot（已有入口，勿新建 wrapper）
+              ga wechat-headless   无 GUI 启动微信 Bot + 后端服务
               ga list              列出所有命令
         """),
     )

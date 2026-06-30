@@ -4,7 +4,9 @@ from urllib.parse import quote
 import requests, qrcode
 from Crypto.Cipher import AES
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_TEMP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'temp')
+from ga_paths import ensure_runtime_dirs, temp_path
+ensure_runtime_dirs()
+_TEMP_DIR = str(temp_path())
 from agentmain import GeneraticAgent
 
 # ── AuthExpired (errcode -14 from getUpdates) ──
@@ -20,7 +22,7 @@ for _k in ('HTTPS_PROXY', 'https_proxy'):
     os.environ.pop(_k, None)  # avoid inherited proxy breaking WeChat long-poll SSL
 API = 'https://ilinkai.weixin.qq.com'
 TOKEN_FILE = Path.home() / '.wxbot' / 'token.json'
-TOKEN_FILE.parent.mkdir(exist_ok=True)
+TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
 VER, MSG_USER, MSG_BOT, ITEM_TEXT, STATE_FINISH = '2.1.10', 1, 2, 1, 2
 ILINK_APP_ID = 'bot'
 ILINK_APP_CLIENT_VERSION = (2 << 16) | (1 << 8) | 10
@@ -432,7 +434,7 @@ if __name__ == '__main__':
     _do_relogin = '--relogin' in sys.argv
     try: _lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM); _lock.bind(('127.0.0.1', 19531))
     except OSError: print('[WeChat] Another instance running, exiting.'); sys.exit(1)
-    _logf = open(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'temp', 'wechatapp.log'), 'a', encoding='utf-8', buffering=1)
+    _logf = open(os.path.join(_TEMP_DIR, 'wechatapp.log'), 'a', encoding='utf-8', buffering=1)
     sys.stdout = sys.stderr = _logf
     print(f'[NEW] Process starting {time.strftime("%m-%d %H:%M")}')
     bot = WxBotClient()
